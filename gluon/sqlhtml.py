@@ -1202,10 +1202,12 @@ def formstyle_bootstrap4_inline_factory(col_label_size=3):
                 elif controls['_type'] == 'checkbox' or controls['_type'] == 'radio':
                     controls.add_class('form-check-input')
                     label.add_class('form-check-label')
-                    label.insert(0, controls)
+                    #label.insert(0, controls)
                     #label.insert(0, ' ')
-                    _controls = DIV(DIV(label, _help, _class="form-check"), _class="%s" % col_class)
-                    label = DIV(_class="sm-hidden %s" % label_col_class)
+                    inline_control = DIV(controls, _help, _class="form-check form-check-inline")
+                    #_controls = DIV(DIV(label, _help, _class="form-check"), _class="%s" % col_class)
+                    _controls = DIV(inline_control, _class="sm-hidden %s" % label_col_class)
+                    #label = DIV(_class="sm-hidden %s" % label_col_class)
                 elif isinstance(controls, (SELECT, TEXTAREA)):
                     controls.add_class('form-control')
 
@@ -2287,7 +2289,7 @@ class SQLFORM(FORM):
              createargs={},
              editargs={},
              viewargs={},
-             selectable_submit_button='Submit',
+             selectable_submit_button_text='Submit',
              buttons_placement = 'right',
              links_placement = 'right',
              noconfirm=False,
@@ -2297,7 +2299,20 @@ class SQLFORM(FORM):
              auto_pagination=True,
              use_cursor=False,
              represent_none=None,
-             showblobs=False):
+             showblobs=False,
+             add_button_text="Add record",
+             add_button_url=None,
+             view_url_custom=False,
+             view_url_base = None,
+             links_in_details=True,
+             filter_callback = None,
+             additional_buttons = None,
+             selectable_select_all = False,
+             selectable_submit_button = None
+             ):
+
+        if filter_callback is not None:
+            paginate = False
 
         dbset = None
         formstyle = formstyle or current.response.formstyle
@@ -2530,7 +2545,7 @@ class SQLFORM(FORM):
                 args = ['view', table._tablename, request.args[-1]]
                 buttons.append(gridbutton('buttonview', 'View',
                                           url(args=args)))
-            if record and links:
+            if record and links and links_in_details:
                 for link in links:
                     if isinstance(link, dict):
                         buttons.append(link['body'](record))
@@ -2738,11 +2753,15 @@ class SQLFORM(FORM):
         console = DIV(_class='web2py_console %(header)s %(cornertop)s' % ui)
         error = None
         if create:
+            if add_button_url is None:
+                buttonurl = url(args=['new', tablename])
+            else:
+                buttonurl = add_button_url
             add = gridbutton(
                 buttonclass='buttonadd',
-                buttontext=T('Add Record'),
+                buttontext=T(add_button_text),
                 title=T("Add record to database"),
-                buttonurl=url(args=['new', tablename]))
+                buttonurl=buttonurl)
             if not searchable:
                 console.append(add)
         else:
@@ -2797,6 +2816,9 @@ class SQLFORM(FORM):
             nrows = 0
             error = T('Unsupported query')
 
+        if additional_buttons is not None:
+            console.append(DIV(additional_buttons))
+
         order = request.vars.order or ''
         asc_icon, desc_icon = sorter_icons
         if sortable:
@@ -2807,7 +2829,13 @@ class SQLFORM(FORM):
 
         headcols = []
         if selectable:
-            headcols.append(TH(_class=ui.get('default')))
+            if selectable_select_all:
+                if "bootstrap" in formstyle:
+                    headcols.append(TH(INPUT(data={'_data-toggle':"tooltip"}, _title="Select all records", _type='checkbox',_onClick="grid_checkbox_toggle(this)", _name='grid_select_all', value=False),_class=ui.get('default')))
+                else:
+                    headcols.append(TH(INPUT( _type='checkbox',_onClick="grid_checkbox_toggle(this)", _name='grid_select_all', value=False),_class=ui.get('default')))
+            else:
+                headcols.append(TH(_class=ui.get('default')))
 
         for field in columns:
             if not field.readable:
@@ -2978,12 +3006,15 @@ class SQLFORM(FORM):
             numrec = 0
             repr_cache = CacheRepresenter()
             for row in rows:
+                if filter_callback is not None:
+                    if not filter_callback(row):
+                        continue
+
                 trcols = []
                 id = row[field_id]
                 if selectable:
                     trcols.append(
-                        INPUT(_type="checkbox", _name="records", _value=id,
-                              value=request.vars.records))
+                        INPUT(_type="checkbox", _name="records", _value=id,_class="grid_select_checkbox",value=request.vars.records))
                 for field in columns:
                     if not field.readable:
                         continue
@@ -3038,7 +3069,7 @@ class SQLFORM(FORM):
                     toadd = []
                     for link in links:
                         if isinstance(link, dict):
-                            toadd.append(TD(link['body'](row)))
+                            toadd.append(TD(link['body'](row),_class='row_buttons', _nowrap=True))
                         else:
                             if link(row):
                                 row_buttons.append(link(row))
@@ -3049,9 +3080,13 @@ class SQLFORM(FORM):
 
                 if include_buttons_column:
                     if details and (not callable(details) or details(row)):
+                        if view_url_custom:
+                            view_url = view_url_base+str(id)
+                        else:
+                            view_url = url(args=['view', tablename, id])
                         row_buttons.append(gridbutton(
                             'buttonview', 'View',
-                            url(args=['view', tablename, id])))
+                            view_url))
                     if editable and (not callable(editable) or editable(row)):
                         row_buttons.append(gridbutton(
                             'buttonedit', 'Edit',
@@ -3098,14 +3133,18 @@ class SQLFORM(FORM):
                         input_ctrl = INPUT(_type="submit", _name='submit_%d' % i, _value=T(submit_text))
                         input_ctrl.add_class(submit_class)
                         inputs.append(input_ctrl)
+
+                elif selectable_submit_button is not None:
+                    inputs = [selectable_submit_button]
+
                 else:
-                    inputs = [INPUT(_type="submit", _value=T(selectable_submit_button))]
+                    inputs = [INPUT(_type="submit",_class="btn btn-default btn-secondary", _value=T(selectable_submit_button_text))]
 
                 if formstyle == 'bootstrap':
                     # add space between buttons
                     htmltable = FORM(htmltable, DIV(_class='form-actions', *inputs))
                 elif not callable(formstyle) and 'bootstrap' in formstyle: # Same for bootstrap 3 & 4
-                     htmltable = FORM(htmltable, DIV(_class='form-group web2py_table_selectable_actions', *inputs))
+                     htmltable = FORM(htmltable, DIV(DIV(*inputs, _class="col-sm-8"), _class='form-group row web2py_table_selectable_actions' ),_id="web2py_grid_form")
                 else:
                     htmltable = FORM(htmltable, *inputs)
 
@@ -3159,6 +3198,25 @@ class SQLFORM(FORM):
         res.search_form = search_form
         res.rows = rows
         res.dbset = dbset
+        if selectable_select_all:
+            select_script = """
+                        function grid_checkbox_toggle(source) {
+                          checkboxes = document.getElementsByClassName('grid_select_checkbox');
+                          for(var i=0, n=checkboxes.length;i<n;i++) {
+                            checkboxes[i].checked = source.checked;
+                          }
+                        }
+                    """
+            tooltip_script = """
+                $(document).ready(function(){
+                      $('[data-toggle="tooltip"]').tooltip();
+                    });
+                            """
+            if "bootstrap" in formstyle:
+                script = select_script +tooltip_script
+            else:
+                script = select_script
+            res.insert(0,SCRIPT(script, _type='text/javascript'))
         return res
 
     @staticmethod
